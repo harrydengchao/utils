@@ -11,7 +11,7 @@ const DataType = {
     return typeof variable === 'undefined'
   },
   'null'(variable) {
-    return typeof variable === null
+    return typeof variable === 'object' && variable === null
   },
   'string'(variable) {
     return typeof variable === 'string'
