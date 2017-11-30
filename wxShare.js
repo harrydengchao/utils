@@ -1,8 +1,15 @@
 ;(function() {
+  // 去除微信默认参数
+  if (/from=\w{1,}/.test(location.search) || /isappinstalled=\w{1,}/.test(location.search)) {
+    var newSearch = location.search.replace(/from=\w{1,}(&|$)/, '').replace(/isappinstalled=\w{1,}(&|$)/, '').replace(/&$|\?$/, '');
+    var newUrl = location.origin + location.pathname + newSearch;
+    location.replace(newUrl);
+  }
+
   var wxClient = /MicroMessenger/i.test(navigator.userAgent);
 
   var operationEnv = {
-    localhost: /^localhost|^\d{1,}\.\d{1,}\.\d{1}/i.test(location.hostname),
+    localhost: /^localhost|^\d{1,}\.\d{1,}\.\d{1,}/i.test(location.hostname),
     devlopment: /^dev/i.test(location.hostname),
     betatest: /^test/i.test(location.hostname),
     production: !(/^dev|^test|^localhost|^\d{1,}\.\d{1,}\.\d{1}/i.test(location.hostname))
@@ -21,11 +28,47 @@
   }
 
   for (var key in API) {
-    API[key] = originEnv.use + API[key];
+    API[key] = originEnv.use + API[key] + '?date=' + Date.now();
   }
 
-  /*------------------------------------------------------------------*/
+  /////////////////////////////////////////////////////////////////////////
+  function request(option) {
+    if (String(option) !== '[object Object]') return undefined
+    option.method = option.method ? option.method.toUpperCase() : 'GET'
+    option.data = option.data || {}
+    var formData = []
+    for (var key in option.data) {
+      formData.push(''.concat(key, '=', option.data[key]))
+    }
+    option.data = formData.join('&')
 
+    if (option.method === 'GET') {
+      option.url += location.search.length === 0 ? ''.concat('?', option.data) : ''.concat('&', option.data)
+    }
+
+    var xhr = new XMLHttpRequest()
+    xhr.responseType = option.responseType || 'json'
+    xhr.onreadystatechange = function () {
+      if (xhr.readyState === 4) {
+        if (xhr.status === 200) {
+          if (option.success && typeof option.success === 'function') {
+            option.success(xhr.response)
+          }
+        } else {
+          if (option.error && typeof option.error === 'function') {
+            option.error()
+          }
+        }
+      }
+    }
+    xhr.open(option.method, option.url, true)
+    if (option.method === 'POST') {
+      xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded')
+    }
+    xhr.send(option.method === 'POST' ? option.data : null)
+  }
+
+  ///////////////////////////////////////////////////////////////////////
   function WxShare() {
     this.config = {
       debug: false,
@@ -36,10 +79,21 @@
       ]
     }
 
+    this.requestLimit = 3
+    this.requestCnt = 0
+
     this.getSinature = function () {
+      var that = this;
+
       if (!wxClient || operationEnv.localhost) {
         window.weui.topTips('请在微信中打开');
         return undefined
+      }
+
+      if (!window.wx) {
+        setTimeout(function() {
+          that.getSinature()
+        }, 100)
       }
 
       if (this.config.signature) {
@@ -48,9 +102,11 @@
         return true
       }
 
-      var _loading = window.weui.loading('数据加载...');
-      var that = this;
-      window.$.ajax({
+      if (this.requestCnt > this.requestLimit) {
+        return undefined
+      }
+      this.requestCnt += 1
+      request({
         url: API.signature,
         method: 'POST',
         data: {
@@ -71,14 +127,15 @@
             return undefined
           }
 
-          that.config = Object.assign({}, that.config, res.data);
+          that.config.signature = res.data.signature;
+          that.config.nonceStr = res.data.nonceStr;
+          that.config.timestamp = res.data.timestamp;
+          that.config.appId = res.data.appId;
+
           that.verify();
         },
         error: function (err) {
 
-        },
-        complete: function () {
-          _loading.hide();
         }
       })
     }
@@ -107,11 +164,12 @@
       //   <img id="wx-share-icon" src="./imgs/wxshare.jpg?v=1.0" alt="">
       // </div>
       var img = document.getElementById('wx-share-icon').src;
+      var shareUrl = location.origin + location.pathname + location.search;
       var config = {
-        title: '绑定资金账号，带您三分钟把握投资机遇',
-        link: location.href,
+        title: '年末投资迷茫？泰九点明方向！',
+        link: shareUrl,
         imgUrl: img,
-        desc: '泰九微刊，三分钟把握最新全盘投资机遇，绑定资金账号即可领取。'
+        desc: '年末如何打赢投资收官战，绑定资金账号免费获取VIP视频，还有话费奖励等你来抽！'
       };
 
       // 检查signature存在
@@ -121,31 +179,36 @@
       }
 
       // 分享到朋友圈
-      wx.onMenuShareTimeline(Object.assign({}, config, {
+      wx.onMenuShareTimeline({
+        title: config.title,
+        link: config.link,
+        imgUrl: config.imgUrl,
         success: function () {
           // TODO: 用户确认分享后执行的回调函数
         },
         cancel: function () {
           // TODO: 用户取消分享后执行的回调函数
         }
-      }));
+      });
 
       // 分享给朋友
-      wx.onMenuShareAppMessage(Object.assign({}, config, {
+      wx.onMenuShareAppMessage({
         type: 'link',
         dataUrl: '',
+        title: config.title,
+        link: config.link,
+        imgUrl: config.imgUrl,
+        desc: config.desc,
         success: function () {
           // TODO: 用户确认分享后执行的回调函数
         },
         cancel: function () {
           // TODO: 用户取消分享后执行的回调函数
         }
-      }));
+      });
     }
   }
 
-  $(function () {
-    var wxShare = new WxShare();
-    wxShare.getSinature();
-  })
+  var wxShare = new WxShare();
+  wxShare.getSinature();
 })();
